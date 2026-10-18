@@ -276,13 +276,15 @@ const saveDay = async (req, res) => {
     update.todos = list;
   }
 
-  const log = (await CampaignDay.findOne({ campaign: campaign._id, date }))
-    || new CampaignDay({ user: req.userId, campaign: campaign._id, date });
-  log.set(update);
+  // Upserted in one step, so two quick toggles on a fresh day can't both try to create it.
+  const log = await CampaignDay.findOneAndUpdate(
+    { campaign: campaign._id, date },
+    { $set: update, $setOnInsert: { user: req.userId } },
+    { upsert: true, returnDocument: "after", runValidators: true, setDefaultsOnInsert: true }
+  );
+  // A day with nothing on it isn't kept. The filter skips it if another request just filled it.
   if (!log.rituals.length && !log.slips.length && !log.todos.length) {
-    if (!log.isNew) await log.deleteOne();
-  } else {
-    await log.save();
+    await CampaignDay.deleteOne({ _id: log._id, rituals: { $size: 0 }, slips: { $size: 0 }, todos: { $size: 0 } });
   }
 
   const logs = await logsFor(req.userId, [campaign._id]);

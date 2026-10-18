@@ -105,7 +105,7 @@ const saveProfile = async (req, res) => {
   const update = { $set: { budgetAmount: amount, budgetPeriod: period }, $unset: { weeklyBudget: 1 } };
   if (currency) update.$set.currency = currency;
   const profile = await FinanceProfile.findOneAndUpdate({ user: req.userId }, update, {
-    new: true,
+    returnDocument: "after",
     upsert: true,
     runValidators: true,
     setDefaultsOnInsert: true,

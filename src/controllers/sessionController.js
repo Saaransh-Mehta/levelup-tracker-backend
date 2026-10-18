@@ -72,12 +72,21 @@ const startFreeSession = async (req, res) => {
   send(res, ...(await createSession(req.userId, { label, minutes })));
 };
 
-// GET /api/sessions?limit=5 — recent sessions across goals and free ones, plus totals.
+// The start of the user's today. The client sends its local midnight, since the server runs on UTC;
+// anything missing or further than a day and a half off falls back to the server's midnight.
+const readDayStart = (value) => {
+  const date = new Date(value);
+  if (typeof value === "string" && !isNaN(date) && Math.abs(Date.now() - date) <= 36 * 60 * 60 * 1000) return date;
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  return midnight;
+};
+
+// GET /api/sessions?limit=5&dayStart=ISO — recent sessions across goals and free ones, plus totals.
 const listRecent = async (req, res) => {
   const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 5));
   const userId = new mongoose.Types.ObjectId(req.userId);
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
+  const startOfDay = readDayStart(req.query.dayStart);
 
   const [sessions, [totals], [today]] = await Promise.all([
     Session.find({ user: req.userId, status: "completed" })

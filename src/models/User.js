@@ -13,6 +13,11 @@ const userSchema = new mongoose.Schema(
     gender: { type: String, required: true, enum: ["male", "female", "other", "prefer_not_to_say"] },
     dateOfBirth: { type: Date, required: true },
     password: { type: String, required: true, select: false },
+    // Tokens issued before this are refused, so changing the password signs out other devices.
+    passwordChangedAt: { type: Date, default: null },
+    // A password-reset link: only the hash of its token is kept, and it stops working at expiry.
+    resetTokenHash: { type: String, select: false },
+    resetTokenExpires: { type: Date, select: false },
     personality: {
       workStyle: { type: String, enum: WORK_STYLES },
       motivation: { type: String, enum: MOTIVATIONS },
@@ -31,6 +36,8 @@ const userSchema = new mongoose.Schema(
 userSchema.set("toJSON", {
   transform: (doc, ret) => {
     delete ret.password;
+    delete ret.resetTokenHash;
+    delete ret.resetTokenExpires;
     delete ret.__v;
     return ret;
   },

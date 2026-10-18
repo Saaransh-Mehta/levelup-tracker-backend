@@ -160,18 +160,20 @@ const logDay = async (req, res) => {
   const habit = await findOwnHabit(req);
   if (!habit) return res.status(404).json({ message: "Habit not found" });
 
-  const log = (await HabitLog.findOne({ habit: habit._id, date })) || new HabitLog({ user: req.userId, habit: habit._id, date });
-  if (addMinutes) {
-    log.minutes = Math.min(1440, Math.max(0, log.minutes + addMinutes));
-    if (habit.targetMinutes && log.minutes >= habit.targetMinutes) log.done = true;
-  }
-  if (done !== undefined) log.done = done;
-
-  if (!log.done && !log.minutes) {
-    if (!log.isNew) await log.deleteOne();
-  } else {
-    await log.save();
-  }
+  // One atomic update, so two quick taps can't both create the day or overwrite each other's minutes.
+  const minutes = { $min: [1440, { $max: [0, { $add: [{ $ifNull: ["$minutes", 0] }, addMinutes || 0] }] }] };
+  const wasDone = { $ifNull: ["$done", false] };
+  const reachedTarget = addMinutes && habit.targetMinutes ? { $gte: ["$minutes", habit.targetMinutes] } : false;
+  const log = await HabitLog.collection.findOneAndUpdate(
+    { habit: habit._id, date },
+    [
+      { $set: { user: habit.user, minutes, createdAt: { $ifNull: ["$createdAt", "$$NOW"] }, updatedAt: "$$NOW" } },
+      { $set: { done: done !== undefined ? done : { $or: [wasDone, reachedTarget] } } },
+    ],
+    { upsert: true, returnDocument: "after" }
+  );
+  // A day with nothing on it isn't kept. The filter skips it if another tap just added to it.
+  if (log && !log.done && !log.minutes) await HabitLog.deleteOne({ _id: log._id, done: false, minutes: 0 });
   res.json({ habit: await summarizeOne(habit, today) });
 };
 

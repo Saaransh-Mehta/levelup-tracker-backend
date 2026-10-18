@@ -98,7 +98,7 @@ const updateGoal = async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ message: "Goal not found" });
 
   const goal = await Goal.findOneAndUpdate({ _id: req.params.id, user: req.userId }, fields, {
-    new: true,
+    returnDocument: "after",
     runValidators: true,
   });
   if (!goal) return res.status(404).json({ message: "Goal not found" });
