@@ -15,6 +15,8 @@ const sessionSchema = new mongoose.Schema(
     campaign: { type: mongoose.Schema.Types.ObjectId, ref: "Campaign", default: null, index: true },
     campaignDate: { type: String, default: null },
     todo: { type: mongoose.Schema.Types.ObjectId, default: null },
+    // Set for a study session; its notes go into the topic's note instead of this session's.
+    topic: { type: mongoose.Schema.Types.ObjectId, ref: "Topic", default: null, index: true },
     plannedSeconds: { type: Number, required: true, min: 60, max: 4 * 60 * 60 },
     status: { type: String, enum: STATUSES, default: "running" },
     startedAt: { type: Date, default: Date.now },

@@ -9,6 +9,7 @@ const sessionRoutes = require("./routes/sessionRoutes");
 const habitRoutes = require("./routes/habitRoutes");
 const financeRoutes = require("./routes/financeRoutes");
 const campaignRoutes = require("./routes/campaignRoutes");
+const topicRoutes = require("./routes/topicRoutes");
 const { authLimiter } = require("./middleware/rateLimit");
 
 // Sites allowed to call the API from a browser. CORS_ORIGINS (comma-separated) replaces the list.
@@ -52,6 +53,7 @@ app.use("/api/sessions", sessionRoutes);
 app.use("/api/habits", habitRoutes);
 app.use("/api/finance", financeRoutes);
 app.use("/api/campaigns", campaignRoutes);
+app.use("/api/topics", topicRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err);

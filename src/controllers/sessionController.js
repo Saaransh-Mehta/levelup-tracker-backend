@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const Goal = require("../models/Goal");
+const Topic = require("../models/Topic");
 const Session = require("../models/Session");
 const Campaign = require("../models/Campaign");
 const CampaignDay = require("../models/CampaignDay");
@@ -35,7 +36,7 @@ const readMinutes = (body) => {
 };
 
 // Starts a session unless one is already open. Returns [status, body].
-const createSession = async (userId, { goal = null, label = "", minutes, todo = null }) => {
+const createSession = async (userId, { goal = null, label = "", minutes, todo = null, topic = null }) => {
   const open = await findOpen(userId);
   if (open && ["running", "paused"].includes(open.status)) {
     return [409, { message: "You already have a session running", session: open }];
@@ -44,6 +45,7 @@ const createSession = async (userId, { goal = null, label = "", minutes, todo = 
     user: userId,
     goal,
     label,
+    topic,
     ...(todo && { campaign: todo.campaign, campaignDate: todo.date, todo: todo._id }),
     plannedSeconds: minutes * 60,
     resumedAt: new Date(),
@@ -92,7 +94,8 @@ const listRecent = async (req, res) => {
     Session.find({ user: req.userId, status: "completed" })
       .sort({ startedAt: -1 })
       .limit(limit)
-      .populate("goal", "title icon"),
+      .populate("goal", "title icon")
+      .populate("topic", "title icon"),
     Session.aggregate([
       { $match: { user: userId, status: "completed" } },
       { $group: { _id: null, count: { $sum: 1 }, seconds: { $sum: "$accumulatedSeconds" } } },
@@ -120,14 +123,18 @@ const todoFor = async (session) => {
   return { _id: todo._id, text: todo.text, done: todo.done, date: session.campaignDate, campaign };
 };
 
-// GET /api/sessions/:id — includes the goal's title and icon (if any) for the focus screen, or the
-// campaign to-do it's spent on.
+// GET /api/sessions/:id — includes the goal's title and icon (if any) for the focus screen, the
+// campaign to-do it's spent on, or the study topic with its notes and videos.
 const getSession = async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) return send(res, 404, { message: "Session not found" });
   const session = await settle(await Session.findOne({ _id: req.params.id, user: req.userId }));
   if (!session) return send(res, 404, { message: "Session not found" });
-  const goal = session.goal ? await Goal.findById(session.goal).select("title icon") : null;
-  send(res, 200, { session, goal, todo: await todoFor(session) });
+  const [goal, todo, topic] = await Promise.all([
+    session.goal ? Goal.findById(session.goal).select("title icon") : null,
+    todoFor(session),
+    session.topic ? Topic.findOne({ _id: session.topic, user: req.userId }) : null,
+  ]);
+  send(res, 200, { session, goal, todo, topic });
 };
 
 // PATCH /api/sessions/:id  { action?: pause|resume|finish, notes?, distractions? }
@@ -191,6 +198,22 @@ const statsByGoal = async (userId) => {
   return new Map(rows.map((r) => [String(r._id), { count: r.count, seconds: r.seconds }]));
 };
 
+// Completed-session totals per topic, for the topic list.
+const statsByTopic = async (userId) => {
+  const rows = await Session.aggregate([
+    { $match: { user: new mongoose.Types.ObjectId(userId), status: "completed", topic: { $ne: null } } },
+    {
+      $group: {
+        _id: "$topic",
+        count: { $sum: 1 },
+        seconds: { $sum: "$accumulatedSeconds" },
+        lastAt: { $max: "$startedAt" },
+      },
+    },
+  ]);
+  return new Map(rows.map((r) => [String(r._id), { count: r.count, seconds: r.seconds, lastAt: r.lastAt }]));
+};
+
 // Completed-session seconds per to-do of one campaign, keyed by to-do id.
 const secondsByTodo = async (userId, campaignId) => {
   const rows = await Session.aggregate([
@@ -214,4 +237,5 @@ module.exports = {
   updateSession,
   listGoalSessions,
   statsByGoal,
+  statsByTopic,
 };
