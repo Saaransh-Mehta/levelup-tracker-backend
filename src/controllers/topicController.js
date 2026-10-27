@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const Topic = require("../models/Topic");
-const { MAX_VIDEOS } = require("../models/Topic");
+const { MAX_VIDEOS, MAX_VIDEO_NOTES } = require("../models/Topic");
 const Session = require("../models/Session");
 const { send, readMinutes, createSession, MINUTES_ERROR, statsByTopic } = require("./sessionController");
 
@@ -90,7 +90,7 @@ const NONE = { count: 0, seconds: 0, lastAt: null };
 // GET /api/topics — summaries without the notes, with study totals. Most recently studied first.
 const listTopics = async (req, res) => {
   const [topics, stats] = await Promise.all([
-    Topic.find({ user: req.userId }).select("-content").sort({ updatedAt: -1 }),
+    Topic.find({ user: req.userId }).select("-content -videos.notes").sort({ updatedAt: -1 }),
     statsByTopic(req.userId),
   ]);
   const list = topics.map((t) => ({ ...t.toJSON(), sessions: stats.get(String(t._id)) || NONE }));
@@ -185,6 +185,84 @@ const removeVideo = async (req, res) => {
   res.json({ topic });
 };
 
+// Validates a timestamped note. Returns { fields } or { error }.
+const readVideoNote = (body, { partial }) => {
+  const fields = {};
+  if (body.at !== undefined || !partial) {
+    const at = Number(body.at);
+    if (!Number.isFinite(at) || at < 0 || at > 24 * 60 * 60) return { error: "Invalid time" };
+    fields.at = Math.floor(at);
+  }
+  if (body.text !== undefined || !partial) {
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text) return { error: "Write something for this moment" };
+    if (text.length > 2000) return { error: "Keep the note under 2000 characters" };
+    fields.text = text;
+  }
+  return { fields };
+};
+
+const validIds = (...ids) => ids.every((id) => mongoose.isValidObjectId(id));
+const videoOf = (topic, videoId) => topic?.videos.id(videoId) || null;
+
+// POST /api/topics/:id/videos/:videoId/notes  { at, text } — returns the video with its notes.
+const addVideoNote = async (req, res) => {
+  const { id, videoId } = req.params;
+  if (!validIds(id, videoId)) return res.status(404).json({ message: "Video not found" });
+  const { fields, error } = readVideoNote(req.body, { partial: false });
+  if (error) return res.status(400).json({ message: error });
+
+  const topic = await Topic.findOneAndUpdate(
+    {
+      _id: id,
+      user: req.userId,
+      videos: { $elemMatch: { _id: videoId, [`notes.${MAX_VIDEO_NOTES - 1}`]: { $exists: false } } },
+    },
+    { $push: { "videos.$.notes": fields } },
+    { returnDocument: "after", runValidators: true }
+  );
+  if (!topic) {
+    const exists = await Topic.exists({ _id: id, user: req.userId, "videos._id": videoId });
+    return exists
+      ? res.status(400).json({ message: `A video holds up to ${MAX_VIDEO_NOTES} notes` })
+      : res.status(404).json({ message: "Video not found" });
+  }
+  const video = videoOf(topic, videoId);
+  res.status(201).json({ video, note: video.notes[video.notes.length - 1] });
+};
+
+// PATCH /api/topics/:id/videos/:videoId/notes/:noteId  { at?, text? }
+const updateVideoNote = async (req, res) => {
+  const { id, videoId, noteId } = req.params;
+  if (!validIds(id, videoId, noteId)) return res.status(404).json({ message: "Note not found" });
+  const { fields, error } = readVideoNote(req.body, { partial: true });
+  if (error) return res.status(400).json({ message: error });
+
+  const set = Object.fromEntries(Object.entries(fields).map(([k, v]) => [`videos.$[v].notes.$[n].${k}`, v]));
+  const topic = await Topic.findOneAndUpdate(
+    { _id: id, user: req.userId, "videos._id": videoId },
+    { $set: set },
+    { arrayFilters: [{ "v._id": videoId }, { "n._id": noteId }], returnDocument: "after", runValidators: true }
+  );
+  const video = videoOf(topic, videoId);
+  if (!video?.notes.id(noteId)) return res.status(404).json({ message: "Note not found" });
+  res.json({ video });
+};
+
+// DELETE /api/topics/:id/videos/:videoId/notes/:noteId
+const removeVideoNote = async (req, res) => {
+  const { id, videoId, noteId } = req.params;
+  if (!validIds(id, videoId, noteId)) return res.status(404).json({ message: "Note not found" });
+  const topic = await Topic.findOneAndUpdate(
+    { _id: id, user: req.userId, "videos._id": videoId },
+    { $pull: { "videos.$.notes": { _id: noteId } } },
+    { returnDocument: "after" }
+  );
+  const video = videoOf(topic, videoId);
+  if (!video) return res.status(404).json({ message: "Video not found" });
+  res.json({ video });
+};
+
 // POST /api/topics/:id/sessions  { minutes } — a study session on this topic.
 const startStudySession = async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) return send(res, 404, { message: "Topic not found" });
@@ -204,5 +282,8 @@ module.exports = {
   deleteTopic,
   addVideo,
   removeVideo,
+  addVideoNote,
+  updateVideoNote,
+  removeVideoNote,
   startStudySession,
 };

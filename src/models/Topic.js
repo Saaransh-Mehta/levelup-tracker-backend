@@ -1,6 +1,13 @@
 const mongoose = require("mongoose");
 
 const MAX_VIDEOS = 50;
+const MAX_VIDEO_NOTES = 300;
+
+// A note pinned to a moment in a video: clicking its time jumps the video there.
+const videoNoteSchema = new mongoose.Schema({
+  at: { type: Number, required: true, min: 0, max: 24 * 60 * 60 },
+  text: { type: String, required: true, trim: true, maxlength: 2000 },
+});
 
 // A YouTube video saved to a topic. The title comes from YouTube when the link is added.
 const videoSchema = new mongoose.Schema(
@@ -10,6 +17,7 @@ const videoSchema = new mongoose.Schema(
     start: { type: Number, default: 0, min: 0 },
     title: { type: String, trim: true, maxlength: 200, default: "YouTube video" },
     channel: { type: String, trim: true, maxlength: 120, default: "" },
+    notes: { type: [videoNoteSchema], default: [] },
   },
   { timestamps: { createdAt: "addedAt", updatedAt: false } }
 );
@@ -37,3 +45,4 @@ topicSchema.set("toJSON", {
 
 module.exports = mongoose.model("Topic", topicSchema);
 module.exports.MAX_VIDEOS = MAX_VIDEOS;
+module.exports.MAX_VIDEO_NOTES = MAX_VIDEO_NOTES;
